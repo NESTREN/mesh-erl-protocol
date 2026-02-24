@@ -1,150 +1,156 @@
-# Mesh-ERL Protocol: **Aegis Ratchet v1**
+# 🔐 Mesh-ERL Protocol — Aegis Ratchet v1
 
 <div align="center">
 
-![Erlang](https://img.shields.io/badge/Erlang-OTP%2025%2B-A90533?logo=erlang)
-![Crypto](https://img.shields.io/badge/Crypto-X25519%20%7C%20HKDF%20%7C%20AES--256--GCM-2E8B57)
-![Status](https://img.shields.io/badge/Status-Prototype%20Implemented-1E90FF)
-![Security](https://img.shields.io/badge/Security-Forward%20Secrecy%20%2B%20Post--Compromise%20Recovery-6A5ACD)
+![Erlang](https://img.shields.io/badge/Erlang-OTP_25%2B-8A2BE2?style=for-the-badge&logo=erlang&logoColor=white)
+![Crypto Suite](https://img.shields.io/badge/Crypto-X25519_·_HKDF_SHA256_·_AES_256_GCM-0A7EA4?style=for-the-badge&logo=letsencrypt&logoColor=white)
+![Security Model](https://img.shields.io/badge/Security-Forward_Secrecy_+_Replay_Protection-1F9D55?style=for-the-badge&logo=shield&logoColor=white)
+![Implementation](https://img.shields.io/badge/Implementation-Erlang_Prototype-FF6B6B?style=for-the-badge&logo=elixir&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-111827?style=for-the-badge)
 
 </div>
 
-> ⚠️ Важный дисклеймер: протокол ниже — учебно-инженерный прототип. Он **существенно усложняет перехват и дешифровку** обычными атаками (MITM без ключей, пассивный sniffing, replay), но никакой протокол не дает «абсолютной невозможности» взлома.
+> ⚠️ **Важно:** это инженерный прототип. Он сильно усложняет стандартные атаки перехвата и подмены, но «абсолютно невзламываемых» протоколов не бывает.
 
 ---
 
-## Идея «революционности»
+## 🚀 Что здесь «революционного»
 
-`Aegis Ratchet v1` комбинирует:
+`Aegis Ratchet v1` сочетает в себе несколько защитных слоев сразу:
 
-1. **Тройной ECDH на X25519** (аналог X3DH-подхода) на рукопожатии.
-2. **HKDF-SHA256** для вывода root key и chain keys.
-3. **Message key per packet**: каждый пакет шифруется одноразовым ключом из ratchet-цепочки.
-4. **AES-256-GCM** (AEAD) с отдельным nonce на каждый пакет.
-5. **Криптографически связанный заголовок (AAD)** для защиты от подмены маршрутизации/метаданных.
-6. **Пост-компромиссное восстановление**: после смены ratchet-ветки старые ключи быстро устаревают.
+1. **Triple-DH рукопожатие (X25519)** — смешивание нескольких ECDH секретов.
+2. **HKDF-SHA256** — стабильный вывод root/chain ключей.
+3. **Message Key на каждый пакет** — отдельный ключ для каждого сообщения.
+4. **AES-256-GCM (AEAD)** — шифрование + контроль целостности.
+5. **AAD-привязка заголовка** — попытка изменить метаданные ломает верификацию.
+6. **Ratchet-прогрессия** — компрометация «сейчас» не раскрывает всё «потом/раньше».
 
 ---
 
-## Архитектура протокола
+## 🧠 Архитектура протокола
+
+> Ниже схема переписана в GitHub-compatible Mermaid синтаксисе (без проблемных токенов).
 
 ```mermaid
 flowchart LR
-    A[Alice: IK_A + EK_A] -->|Init Packet| B[Bob: IK_B + OPK_B]
-    B -->|Response + Ack| A
+    A["Alice: IK_A + EK_A"] -->|"Init packet"| B["Bob: IK_B + OPK_B"]
+    B -->|"Response + ack"| A
 
-    subgraph Handshake Secret Mix
-      D1[DH1 = ECDH(EK_A, IK_B)]
-      D2[DH2 = ECDH(IK_A, OPK_B)]
-      D3[DH3 = ECDH(EK_A, OPK_B)]
-      KDF[HKDF-SHA256]
+    subgraph HS["Handshake Secret Mix"]
+      D1["DH1 = ECDH EK_A · IK_B"]
+      D2["DH2 = ECDH IK_A · OPK_B"]
+      D3["DH3 = ECDH EK_A · OPK_B"]
+      KDF["HKDF SHA256"]
       D1 --> KDF
       D2 --> KDF
       D3 --> KDF
     end
 
-    KDF --> RK[Root Key]
-    RK --> CKs[Send Chain Key]
-    RK --> CKr[Recv Chain Key]
+    KDF --> RK["Root Key"]
+    RK --> CKs["Send Chain Key"]
+    RK --> CKr["Recv Chain Key"]
 ```
 
 ---
 
-## Поток сообщения (одно сообщение)
+## 📨 Поток одного сообщения
 
 ```mermaid
 sequenceDiagram
     participant S as Sender
-    participant N as Network/Attacker
+    participant N as Network / Attacker
     participant R as Receiver
 
-    S->>S: mk = HMAC(chain_key, counter)
-    S->>S: next_chain_key = HMAC(chain_key, "next")
-    S->>S: nonce = random(96bit)
-    S->>N: header(counter, nonce) + AES-GCM(ciphertext, tag, aad=header)
-    N-->>R: пересылка/попытка модификации
-    R->>R: mk = HMAC(chain_key, counter)
-    R->>R: verify tag with AAD(header)
+    S->>S: derive message_key from chain_key + counter
+    S->>S: derive next_chain_key
+    S->>S: nonce = random 96-bit
+    S->>N: header + AEAD ciphertext + tag
+    N-->>R: forward or tamper attempt
+    R->>R: derive same message_key
+    R->>R: verify tag with header as AAD
     R->>R: decrypt or reject
 ```
 
 ---
 
-## Где «упирается» атака
+## 🛡️ Во что «упирается» атака
 
 ```mermaid
 flowchart TD
-    X[Атакующий перехватывает трафик] --> Y{Сценарий атаки}
+    X["Attacker intercepts traffic"] --> Y{"Attack type"}
 
-    Y --> P[Пассивный перехват]
-    P --> P1[Видит только ciphertext + nonce + counter]
-    P1 --> P2[Нет shared secret => нет mk]
+    Y --> P["Passive sniffing"]
+    P --> P1["Sees only ciphertext, nonce, counter"]
+    P1 --> P2["No shared secret => no message key"]
 
-    Y --> M[MITM-подмена пакета]
-    M --> M1[Меняет header/ciphertext]
-    M1 --> M2[AES-GCM tag fail из-за AAD-связи]
+    Y --> M["Tampering / MITM"]
+    M --> M1["Changes header or ciphertext"]
+    M1 --> M2["AEAD tag check fails because AAD bound"]
 
-    Y --> R[Replay]
-    R --> R1[Повтор старого counter]
-    R1 --> R2[Отклонение: counter уже использован]
+    Y --> R["Replay"]
+    R --> R1["Resends old packet"]
+    R1 --> R2["Counter already used => reject"]
 
-    Y --> K[Компрометация текущего ключа]
-    K --> K1[Ограниченный ущерб во времени]
-    K1 --> K2[После ratchet-ротации старые/будущие пакеты не раскрываются полностью]
+    Y --> K["Current key compromise"]
+    K --> K1["Damage limited in time window"]
+    K1 --> K2["Ratchet progression reduces blast radius"]
 ```
 
 ---
 
-## Практическая реализация
+## ⚙️ Практическая реализация
 
-Реализация находится в `src/mesh_aegis.erl` и демонстрация в `src/mesh_demo.erl`.
+- Протокол: `src/mesh_aegis.erl`
+- Демо: `src/mesh_demo.erl`
 
-### Что уже реализовано
+### Реализовано
 
-- Генерация long-term identity ключей (`IK`) и ephemeral ключей (`EK`, `OPK`) на `X25519`.
-- Handshake с тройным ECDH и KDF.
-- Двусторонние send/recv chain keys.
-- Шифрование/дешифровка сообщений через AES-256-GCM.
-- Проверка replay (монотонный счетчик).
-- Верификация целостности через GCM tag + AAD.
+- Генерация identity и ephemeral ключей на `X25519`.
+- Triple-DH handshake + HKDF key schedule.
+- Отдельные send/recv chain keys.
+- AEAD шифрование `AES-256-GCM`.
+- Replay защита через монотонный counter.
+- Аутентификация заголовка через AAD.
 
 ---
 
-## Быстрый запуск
+## ▶️ Быстрый запуск
 
 ```bash
 erlc -o ebin src/mesh_aegis.erl src/mesh_demo.erl
 erl -pa ebin -noshell -s mesh_demo run -s init stop
 ```
 
-Ожидаемый результат:
-- успешный handshake,
-- обмен зашифрованными сообщениями,
-- демонстрация провала tampering/replay атаки.
+Ожидаемо в выводе:
+
+- `Handshake complete.`
+- `Tampering attack blocked ...`
+- `Replay attack blocked.`
+- Успешная двусторонняя расшифровка сообщений.
 
 ---
 
-## Криптографический состав
+## 🔬 Криптографический стек
 
-- **ECDH**: X25519
-- **KDF**: HKDF-SHA256 (extract+expand)
-- **AEAD**: AES-256-GCM
-- **Key progression**: HMAC-SHA256 ratchet chain
-
----
-
-## Ограничения прототипа
-
-- Нет PKI/подписей и pinning identity в production-формате.
-- Нет полноценного asynchronous skip-message key store (как в полном Double Ratchet).
-- Нет formal verification.
+- **ECDH:** X25519
+- **KDF:** HKDF-SHA256
+- **AEAD:** AES-256-GCM
+- **Ratchet progression:** HMAC-SHA256
 
 ---
 
-## Рекомендации для production
+## ⚠️ Ограничения прототипа
 
-1. Добавить подписи identity-ключей (Ed25519) и trust-on-first-use/pinning.
-2. Добавить post-quantum KEM (например, Kyber) в secret mix.
-3. Реализовать управление сессиями, ротацию и expiration ключей.
-4. Провести внешний security audit.
+- Нет production-grade identity verification (подписи/pinning).
+- Нет полного механизма хранения пропущенных message keys (как в полном Double Ratchet).
+- Нет formal verification и внешнего аудита.
+
+---
+
+## ✅ Что добавить до production
+
+1. Ed25519 подписи identity-ключей + pinning/TOFU.
+2. Hybrid secret mix (например, + post-quantum KEM).
+3. Session lifecycle: expiration, rekey, revocation.
+4. Внешний security audit + threat-model review.
 
